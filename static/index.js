@@ -529,14 +529,14 @@ canvas.addEventListener('mouseup', e => {
 });
 
 canvas.addEventListener('touchend', e => {
-    if (e.touches.length === 0 && moveDistance < 4 && !pinchDownPos) {
+    if (moveDistance < 4 && !pinchDownPos) {
         let x = (prevPos[0] - offset[0]) / scale;
         let y = (prevPos[1] - offset[1]) / scale;
         setPixel(x, y);
     }
     downPos = null;
     downOffset = null;
-    pinchDownPos = null;
+    if (e.touches.length === 0) pinchDownPos = null;
     moveDistance = 0;
 });
 
