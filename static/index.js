@@ -471,12 +471,23 @@ canvas.addEventListener('mousemove', e => {
     drawCursor = true;
     redraw();
 });
+let downScale = 1;
+let pinchDownPos = null;
+let downCenter = null;
 canvas.addEventListener('touchstart', e => {
     drawCursor = false;
     e.preventDefault();
     downPos = [e.touches[0].clientX, e.touches[0].clientY];
     prevPos = downPos.slice();
     downOffset = [offset[0], offset[1]];
+    if (e.touches[1]) {
+        pinchDownPos = [e.touches[1].clientX, e.touches[1].clientY];
+        downCenter = [
+            (e.touches[1].clientX - downPos[0]) / 2 + downPos[0],
+            (e.touches[1].clientY - downPos[1]) / 2 + downPos[1]
+        ];
+        downScale = scale;
+    }
 });
 canvas.addEventListener('touchmove', e => {
     if (downPos) {
@@ -484,8 +495,17 @@ canvas.addEventListener('touchmove', e => {
         let y = e.touches[0].clientY;
         moveDistance += Math.hypot(x - prevPos[0], y - prevPos[1]);
         prevPos = [x, y];
-        offset[0] = (x - downPos[0]) + downOffset[0];
-        offset[1] = (y - downPos[1]) + downOffset[1];
+        if (pinchDownPos && e.touches[1]) {
+            let startDiag = Math.hypot(pinchDownPos[0] - downPos[0], pinchDownPos[1] - downPos[1]);
+            let curDiag = Math.hypot(e.touches[1].clientX - x, e.touches[1].clientY - y);
+            let factor = curDiag / startDiag;
+            scale = downScale * factor;
+            offset[0] = (downOffset[0] - downCenter[0]) * factor + downCenter[0];
+            offset[1] = (downOffset[1] - downCenter[1]) * factor + downCenter[1];
+        } else if (!pinchDownPos) {
+            offset[0] = (x - downPos[0]) + downOffset[0];
+            offset[1] = (y - downPos[1]) + downOffset[1];
+        }
         clampView();
         redraw();
     }
@@ -509,13 +529,14 @@ canvas.addEventListener('mouseup', e => {
 });
 
 canvas.addEventListener('touchend', e => {
-    if (moveDistance < 4) {
+    if (moveDistance < 4 && !pinchDownPos) {
         let x = (prevPos[0] - offset[0]) / scale;
         let y = (prevPos[1] - offset[1]) / scale;
         setPixel(x, y);
     }
     downPos = null;
     downOffset = null;
+    pinchDownPos = null;
     moveDistance = 0;
 });
 
