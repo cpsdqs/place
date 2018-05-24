@@ -112,6 +112,39 @@ impl Canvas {
             .map(|(x, y, width, height)| self.region(*x, *y, *width, *height).unwrap())
             .collect()
     }
+
+    pub fn set_size(&mut self, new_width: u32, new_height: u32) {
+        let mut new_pixels = Vec::with_capacity((new_width * new_height * 3) as usize);
+
+        let max_x = if self.width > new_width {
+            new_width
+        } else {
+            self.width
+        };
+        let add_x = new_width.saturating_sub(self.width);
+        let mut add_x_pixels = Vec::new();
+        add_x_pixels.resize((add_x * 3) as usize, 255);
+        let mut full_x_pixels = Vec::new();
+        full_x_pixels.resize((new_width * 3) as usize, 255);
+
+        for y in 0..self.height {
+            if y >= new_height {
+                break;
+            }
+
+            new_pixels.extend_from_slice(&self.pixels[self.index(0, y)..self.index(max_x, y)]);
+            new_pixels.extend_from_slice(&add_x_pixels);
+        }
+
+        for _ in self.height..new_height {
+            new_pixels.extend_from_slice(&full_x_pixels);
+        }
+
+        self.width = new_width;
+        self.height = new_height;
+        self.pixels = new_pixels;
+        self.changed_pixels.clear();
+    }
 }
 
 /// QuadTree node.

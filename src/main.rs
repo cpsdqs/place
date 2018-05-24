@@ -2,6 +2,7 @@ extern crate ws;
 #[macro_use]
 extern crate serde_derive;
 extern crate base64;
+extern crate crypto_hash;
 extern crate serde;
 extern crate serde_json;
 
@@ -11,9 +12,12 @@ use std::sync::{mpsc, Arc, Mutex, Weak};
 use std::{env, fs, io, thread, time};
 
 mod canvas;
+mod console;
+mod login;
 mod messages;
 
 use canvas::Canvas;
+use login::Logins;
 use messages::{ClientMessage, ClientRequest};
 
 fn main() {
@@ -34,11 +38,19 @@ fn main() {
 
 const MAX_PIXELS_PER_FRAME: usize = 3000;
 
-enum UpdateMsg {
-    FullUpdate(u64, Arc<ws::Sender>),
+pub struct ClientSender {
+    id: u64,
+    id_info: String,
+    out: Arc<ws::Sender>,
+}
+
+pub enum UpdateMsg {
+    FullUpdate(ClientSender),
     Remove(u64),
     SetPixel { x: u32, y: u32, r: u8, g: u8, b: u8 },
     ChatMessage { x: f32, y: f32, text: String },
+    Broadcast { text: String },
+    SetSize(u32),
 }
 
 fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalState>>) {
@@ -72,8 +84,9 @@ fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalSta
             let mut full_update = None;
             for message in messages {
                 match message {
-                    UpdateMsg::FullUpdate(id, out) => {
-                        global.clients.insert(id, Arc::clone(&out));
+                    UpdateMsg::FullUpdate(sender) => {
+                        let out = Arc::clone(&sender.out);
+                        global.clients.insert(sender.id, sender);
                         if full_update.is_none() {
                             let region: messages::RGBARegion = canvas
                                 .region(0, 0, canvas.width, canvas.height)
@@ -109,6 +122,22 @@ fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalSta
                             });
                         }
                     }
+                    UpdateMsg::Broadcast { text } => {
+                        broadcasts.push(ClientMessage::Broadcast { text });
+                    }
+                    UpdateMsg::SetSize(size) => {
+                        canvas.set_size(size, size);
+
+                        let region: messages::RGBARegion = canvas
+                            .region(0, 0, canvas.width, canvas.height)
+                            .unwrap()
+                            .into();
+                        broadcasts.push(ClientMessage::FullUpdate {
+                            w: canvas.width,
+                            h: canvas.height,
+                            data: region.data,
+                        });
+                    }
                 }
             }
 
@@ -120,10 +149,10 @@ fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalSta
 
             if !global.clients.is_empty() {
                 let client = global.clients.iter().next().unwrap().1;
-                client.broadcast(message).unwrap();
+                client.out.broadcast(message).unwrap();
 
                 for broadcast in broadcasts {
-                    client.broadcast(broadcast).unwrap();
+                    client.out.broadcast(broadcast).unwrap();
                 }
             }
         }
@@ -147,9 +176,10 @@ fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalSta
     }
 }
 
-struct GlobalState {
+pub struct GlobalState {
     static_dir: PathBuf,
-    clients: HashMap<u64, Arc<ws::Sender>>,
+    clients: HashMap<u64, ClientSender>,
+    logins: Logins,
 }
 
 impl GlobalState {
@@ -161,6 +191,7 @@ impl GlobalState {
                 .canonicalize()
                 .unwrap(),
             clients: HashMap::new(),
+            logins: Logins::init(),
         }
     }
 }
@@ -170,6 +201,9 @@ struct ConnHandler {
     global: Weak<Mutex<GlobalState>>,
     update_tx: mpsc::Sender<UpdateMsg>,
     id: u64,
+    prev_login_attempt: Option<time::Instant>,
+    login: Option<String>,
+    id_info: String,
 }
 
 impl ConnHandler {
@@ -185,6 +219,9 @@ impl ConnHandler {
             global,
             update_tx,
             id,
+            prev_login_attempt: None,
+            login: None,
+            id_info: String::new(),
         }
     }
 
@@ -221,6 +258,14 @@ impl ConnHandler {
 
 impl ws::Handler for ConnHandler {
     fn on_request(&mut self, req: &ws::Request) -> ws::Result<(ws::Response)> {
+        let mut user_agent = String::from("?");
+        for (header, data) in req.headers() {
+            if header == "User-Agent" {
+                user_agent = String::from_utf8_lossy(data).to_string();
+            }
+        }
+        self.id_info = format!("addr: {:?}, ua: {}", req.client_addr(), user_agent);
+
         match req.resource() {
             "/canvas" => ws::Response::from_request(req),
             path => {
@@ -280,7 +325,11 @@ impl ws::Handler for ConnHandler {
 
     fn on_open(&mut self, _: ws::Handshake) -> ws::Result<()> {
         self.update_tx
-            .send(UpdateMsg::FullUpdate(self.id, Arc::clone(&self.out)))
+            .send(UpdateMsg::FullUpdate(ClientSender {
+                id: self.id,
+                id_info: self.id_info.clone(),
+                out: Arc::clone(&self.out)
+            }))
             .unwrap();
         Ok(())
     }
@@ -310,7 +359,32 @@ impl ws::Handler for ConnHandler {
                         .send(UpdateMsg::ChatMessage { x, y, text })
                         .unwrap();
                 }
-                _ => println!("{:?}", client_request),
+                ClientRequest::Auth { login, password } => {
+                    if let Some(prev_time) = self.prev_login_attempt {
+                        if prev_time.elapsed().as_secs() < 3 {
+                            self.send(ClientMessage::Auth(None));
+                            return Ok(());
+                        }
+                    }
+
+                    let global_lock = self.global.upgrade().unwrap();
+                    if global_lock
+                        .lock()
+                        .unwrap()
+                        .logins
+                        .verify_login(&login, &password)
+                    {
+                        self.send(ClientMessage::Auth(Some(true)));
+                        self.send(ClientMessage::Console(format!("Logged in ({})", login)));
+                        self.login = Some(login);
+                    } else {
+                        self.prev_login_attempt = Some(time::Instant::now());
+                        self.send(ClientMessage::Auth(Some(false)));
+                    }
+                }
+                ClientRequest::Console(cmd) => {
+                    console::run_command(&self.out, &self.update_tx, &self.global, &cmd);
+                }
             }
         } else {
             self.send_error("socket-message-type", "Message type must be text");

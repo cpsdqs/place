@@ -12,14 +12,11 @@ pub enum ClientRequest {
     #[serde(rename = "chat-message")]
     ChatMessage { x: f32, y: f32, text: String },
 
-    #[serde(rename = "admin-auth")]
-    AdminAuth(String),
+    #[serde(rename = "auth")]
+    Auth { login: String, password: String },
 
-    #[serde(rename = "admin-console")]
-    AdminConsole(String),
-
-    #[serde(rename = "admin-broadcast")]
-    AdminBroadcast { text: String },
+    #[serde(rename = "console")]
+    Console(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,6 +69,15 @@ pub enum ClientMessage {
         id_hue: Option<f32>,
         is_admin: bool,
     },
+
+    #[serde(rename = "broadcast")]
+    Broadcast { text: String },
+
+    #[serde(rename = "auth")]
+    Auth(Option<bool>),
+
+    #[serde(rename = "console")]
+    Console(String),
 }
 
 impl Into<ws::Message> for ClientMessage {

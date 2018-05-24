@@ -51,8 +51,8 @@ let drawCursor = false;
 // list of chat bubbles
 let chatBubbles = [];
 
-// last system message
-let systemMessage;
+// list of broadcasts
+let broadcasts = [];
 
 // if true, is connected to the server
 let isConnected = false;
@@ -110,23 +110,37 @@ let redraw = function () {
     ctx.scale(scale, scale);
     ctx.drawImage(dCanvas, 0, 0);
 
-    if (systemMessage) {
-        let sdt = (Date.now() - systemMessage.time) / 1000;
-        if (sdt < 5) {
-            ctx.save();
-            ctx.scale(1 / scale, 1 / scale);
-            ctx.translate(-offset[0], -offset[1]);
-            ctx.fillStyle = '#fff';
-            ctx.strokeStyle = '#000';
-            ctx.lineWidth = 4;
-            ctx.font = '14px sans-serif';
-            ctx.strokeText(systemMessage.text, 10, 15);
-            ctx.fillText(systemMessage.text, 10, 15);
-            ctx.restore();
-        } else {
-            systemMessage = null;
-        }
+    let now = Date.now();
+
+    ctx.save();
+    ctx.scale(1 / scale, 1 / scale);
+    ctx.translate(-offset[0], -offset[1]);
+    let i = 0;
+    let removeBroadcasts = [];
+    for (let broadcast of broadcasts) {
+        let bdt = (now - broadcast.time) / 1000
+        let opacity = bdt > 10 ? 0 : bdt > 8 ? 1 - (bdt - 8) / 2 : 1;
+        if (bdt > 10) removeBroadcasts.push(i);
+
+        ctx.globalAlpha = opacity;
+        ctx.fillStyle = '#fff';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 4;
+        ctx.font = '24px sans-serif';
+        let width = ctx.measureText(broadcast.data.text).width;
+        let x = (window.innerWidth - width) / 2;
+        let y = (window.innerHeight - 12) / 2;
+        ctx.strokeText(broadcast.data.text, x, y);
+        ctx.fillText(broadcast.data.text, x, y);
+
+        i++;
     }
+
+    let coffset = 0;
+    for (let i of removeBroadcasts) {
+        broadcasts.splice(i + (coffset--), 1);
+    }
+    ctx.restore();
 
     let cursorX = (cursorPos[0] - offset[0]) / scale;
     let cursorY = (cursorPos[1] - offset[1]) / scale;
@@ -137,11 +151,10 @@ let redraw = function () {
     }
 
     let removeBubbles = [];
-    let i = 0;
     ctx.font = `12px sans-serif`;
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1 / scale;
-    let now = Date.now();
+    i = 0;
     let bubblePositions = [];
     for (let bubble of chatBubbles) {
         let bdt = (now - bubble.time) / 1000
@@ -231,12 +244,12 @@ let redraw = function () {
     }
     ctx.globalAlpha = 1;
 
-    let coffset = 0;
+    coffset = 0;
     for (let i of removeBubbles) {
         chatBubbles.splice(i + (coffset--), 1);
     }
 
-    if (!chatBubbles.length && !systemMessage) stopDrawLoop();
+    if (!chatBubbles.length && !broadcasts.length) stopDrawLoop();
 };
 
 let drawLoopID = 0;
@@ -295,6 +308,8 @@ let logChatMessages = false;
 // websocket
 let ws
 
+let consoleWSDidOpen, consoleWSDidClose, consoleWsOnMessage;
+
 // connects websocket
 let init = function initWS () {
     let protocol = location.protocol === 'https:' ? 'wss://' : 'ws://';
@@ -302,6 +317,7 @@ let init = function initWS () {
     ws.onopen = () => {
         isConnected = true;
         redraw();
+        consoleWSDidOpen();
     };
     ws.onmessage = msg => {
         msg = JSON.parse(msg.data);
@@ -325,13 +341,20 @@ let init = function initWS () {
             });
             startDrawLoop();
             redraw();
-        } else if (msg.type === 'system-message') {
-            systemMessage = {
-                text: msg.data,
-                time: Date.now()
-            };
+        } else if (msg.type === 'broadcast') {
+            if (logChatMessages) {
+                console.info(`[BROADCAST] ${msg.data.text}`);
+            }
+
+            broadcasts.push({
+                data: msg.data,
+                time: Date.now(),
+            });
+
             startDrawLoop();
             redraw();
+        } else if (msg.type === 'auth' || msg.type === 'console') {
+            consoleWsOnMessage(msg);
         } else {
             console.log(msg);
         }
@@ -340,9 +363,9 @@ let init = function initWS () {
         isConnected = false;
         setTimeout(init, 1000);
         redraw();
+        consoleWSDidClose();
     };
 }
-init()
 
 canvas.addEventListener('mousemove', e => {
     cursorPos = [e.offsetX, e.offsetY];
@@ -615,20 +638,112 @@ window.addEventListener('keyup', e => {
     }
 });
 
-let sendStringData = (type, data) => {
-    if (type === undefined) {
-        type = window.prompt('Message type');
-        if (type === null) return;
-    }
-    if (data === undefined) {
-        data = window.prompt(type);
-        if (data === null) return;
-    }
-    ws.send(JSON.stringify({ type, data }));
+{
+    // console
+    let panel = document.querySelector('#console');
+    let messages = document.querySelector('#console-messages');
+    let prompt = document.querySelector('#console-input-prompt');
+    let input = document.querySelector('#console-input');
+    input.disabled = true;
+
+    window.addEventListener('keyup', e => {
+        if (e.key === 'F4') {
+            e.preventDefault();
+            if (panel.classList.contains('open')) {
+                panel.classList.remove('open');
+                input.blur();
+            } else {
+                panel.classList.add('open');
+                input.focus();
+            }
+        }
+    });
+
+    let state = 'login';
+
+    let setPrompt = (text, isPassword) => {
+        prompt.textContent = text;
+        if (!isPassword && input.type === 'password') {
+            input.value = '';
+        }
+        input.type = isPassword ? 'password' : 'text';
+    };
+
+    consoleWSDidOpen = () => {
+        input.disabled = false;
+        setPrompt('login');
+        state = 'login';
+    };
+    consoleWSDidClose = () => {
+        setPrompt('Disconnected');
+        input.disabled = true;
+    };
+
+    let login;
+
+    let putMessage = (msg, classNames = '') => {
+        let message = document.createElement('div');
+        message.className = 'console-message ' + classNames;
+        message.textContent = msg;
+        let scrollHeight = messages.scrollHeight;
+        messages.appendChild(message);
+
+        if (scrollHeight - messages.scrollTop === messages.offsetHeight) {
+            messages.scrollTop = messages.scrollHeight - messages.offsetHeight;
+        }
+    };
+
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            let cmd = input.value;
+            input.value = '';
+
+            if (state === 'login') {
+                login = cmd;
+                state = 'password';
+                setPrompt('password', true);
+            } else if (state === 'password') {
+                ws.send(JSON.stringify({
+                    type: 'auth',
+                    data: {
+                        login,
+                        password: cmd,
+                    }
+                }));
+                state = 'waiting';
+                setPrompt('logging in…');
+            } else if (state === 'waiting') {
+                input.value = cmd;
+            } else if (state === 'logged-in') {
+                putMessage(cmd, 'command');
+                ws.send(JSON.stringify({
+                    type: 'console',
+                    data: cmd,
+                }));
+            }
+        }
+    });
+
+    consoleWsOnMessage = msg => {
+        if (msg.type === 'auth') {
+            if (msg.data) {
+                setPrompt('place');
+                state = 'logged-in';
+            } else {
+                state = 'login';
+                if (msg.data === null) {
+                        setPrompt('waiting');
+                        setTimeout(() => {
+                            setPrompt('login');
+                        }, 3000);
+                } else {
+                    setPrompt('login');
+                }
+            }
+        } else if (msg.type === 'console') {
+            putMessage(msg.data);
+        }
+    };
 }
-window.addEventListener('keyup', e => {
-    if (e.key === 'F4') {
-        e.preventDefault();
-        sendStringData()
-    }
-});
+
+init();
