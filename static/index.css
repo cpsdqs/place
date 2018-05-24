@@ -1,0 +1,112 @@
+#canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+}
+
+#controls {
+    position: fixed;
+    left: 10px;
+    bottom: 10px;
+    background: #eee;
+    transition: transform 0.3s;
+    padding: 5px 10px;
+    border-radius: 4px;
+    line-height: 0;
+}
+
+#controls .current-color-disp {
+    width: 32px;
+    height: 24px;
+    border-radius: 4px;
+    margin-right: 4px;
+    border: 1px solid #333;
+    display: inline-block;
+    box-sizing: border-box;
+    vertical-align: bottom;
+}
+
+#controls .color-btn {
+    width: 24px;
+    height: 24px;
+    border: 1px solid #333;
+    border-left: none;
+    box-sizing: border-box;
+}
+
+#controls .color-btn::before {
+    content: '\00a0';
+}
+
+#controls .color-btn:first-of-type {
+    border-radius: 4px 0 0 4px;
+    border-left: 1px solid #333;
+}
+
+#controls .zoom-btn {
+    background: #ddd;
+    width: 32px;
+    height: 24px;
+    border: 1px solid #333;
+    border-left: none;
+    padding: 2px 5px;
+    margin: 0;
+}
+#controls .zoom-in {}
+#controls .zoom-out {
+    border-radius: 0 4px 4px 0;
+}
+
+#controls .hex-input-wrap {
+    display: inline-block;
+    border-radius: 4px;
+    margin-left: 4px;
+    border: 1px solid #333;
+    padding-left: 5px;
+    font-family: monospace;
+}
+
+#controls .hex-input-wrap input {
+    margin: 0;
+    border: none;
+    height: 22px;
+    background: none;
+    width: 8ex;
+    font: inherit;
+}
+#controls .help-btn {
+    font: inherit;
+    font-family: monospace;
+    background: #ddd;
+    border: 1px solid #333;
+    height: 24px;
+    border-radius: 4px;
+    margin-left: 4px;
+}
+
+#help {
+    display: none;
+}
+
+#help.open {
+    display: block;
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    padding: 10px;
+    background: #eee;
+    border-radius: 4px;
+    font-family: sans-serif;
+}
+
+.chat-input {
+    position: fixed;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid #fff;
+    border-radius: 4px;
+    min-width: 200px;
+    margin: 0;
+    color: #fff;
+}
