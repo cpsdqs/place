@@ -1,23 +1,32 @@
 use std::collections::HashSet;
 
+/// A canvas region.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Region {
     pub x: u32,
     pub y: u32,
     pub w: u32,
     pub h: u32,
+
+    /// RGB data.
     pub data: Vec<u8>,
 }
 
+/// A canvas.
 #[derive(Debug, Clone)]
 pub struct Canvas {
     pub width: u32,
     pub height: u32,
+
+    /// RGB data.
     pub pixels: Vec<u8>,
+
+    /// Records changed pixels, for `compile_deltas`.
     changed_pixels: HashSet<(u32, u32)>,
 }
 
 impl Canvas {
+    /// Creates a new canvas.
     pub fn new(width: u32, height: u32, pixels: Vec<u8>) -> Canvas {
         Canvas {
             width,
@@ -27,12 +36,14 @@ impl Canvas {
         }
     }
 
+    /// Creates a blank canvas.
     pub fn blank(width: u32, height: u32) -> Canvas {
         let mut pixels = Vec::with_capacity((width * height * 3) as usize);
         pixels.resize((width * height * 3) as usize, 255);
         Self::new(width, height, pixels)
     }
 
+    /// Deserializes a canvas from file data, or returns None if the file is invalid.
     pub fn from_file(mut data: Vec<u8>) -> Option<Canvas> {
         if data.len() < 8 {
             return None;
@@ -46,6 +57,7 @@ impl Canvas {
         Some(Self::new(width, height, pixels))
     }
 
+    /// Serializes the canvas for storage.
     pub fn to_file(&self) -> Vec<u8> {
         let mut vec = Vec::with_capacity(8);
         unsafe {
@@ -57,10 +69,12 @@ impl Canvas {
         vec
     }
 
+    /// Returns the index of the coordinates in `pixels`.
     fn index(&self, x: u32, y: u32) -> usize {
         (self.width * y + x) as usize * 3
     }
 
+    /// Returns a region, if it's within the canvas.
     pub fn region(&self, x: u32, y: u32, w: u32, h: u32) -> Option<Region> {
         if x >= self.width || x + w > self.width || y >= self.height || y + h > self.height {
             // nope
@@ -76,6 +90,7 @@ impl Canvas {
         Some(Region { x, y, w, h, data })
     }
 
+    /// Sets a single pixel.
     pub fn set_pixel(&mut self, x: u32, y: u32, r: u8, g: u8, b: u8) {
         if x >= self.width || y >= self.height {
             // nope
@@ -88,7 +103,11 @@ impl Canvas {
         self.pixels[index + 2] = b;
     }
 
+    /// Compiles delta regions, resetting changed_pixels.
     pub fn compile_deltas(&mut self, max_pixels: Option<usize>) -> Vec<Region> {
+        // instead of sending each changed pixel to the client, this will compile
+        // a list of regions that have changed pixels using a simple quad tree.
+
         let mut quad_tree = QuadNode::new(0, 0, self.width, self.height);
 
         let mut i = 0;
@@ -113,6 +132,7 @@ impl Canvas {
             .collect()
     }
 
+    /// Sets a new size, copying as much data as possible. New regions will be white.
     pub fn set_size(&mut self, new_width: u32, new_height: u32) {
         let mut new_pixels = Vec::with_capacity((new_width * new_height * 3) as usize);
 
@@ -168,6 +188,7 @@ struct QuadNode {
 }
 
 impl QuadNode {
+    /// Creates a new quad-tree node.
     pub fn new(x: u32, y: u32, width: u32, height: u32) -> QuadNode {
         QuadNode {
             x,
@@ -182,6 +203,7 @@ impl QuadNode {
         }
     }
 
+    /// Returns the quad within which x and y are located.
     pub fn mut_quad(&mut self, x: u32, y: u32) -> &mut Option<Box<QuadNode>> {
         let x_least = x < self.width / 2;
         let y_least = y < self.height / 2;
@@ -193,6 +215,7 @@ impl QuadNode {
         }
     }
 
+    /// Returns the rectangle for the quad within which x and y are located.
     pub fn quad_rect(&self, x: u32, y: u32) -> (u32, u32, u32, u32) {
         let x_least = x < self.width / 2;
         let y_least = y < self.height / 2;
@@ -216,6 +239,7 @@ impl QuadNode {
         )
     }
 
+    /// Marks (x, y) as having data (recursively).
     pub fn insert_data(&mut self, x: u32, y: u32) {
         if self.width == 1 && self.height == 1 {
             self.data = vec![(x, y)];
@@ -238,6 +262,7 @@ impl QuadNode {
         quad.as_mut().unwrap().insert_data(x, y);
     }
 
+    /// Merges quad-tree nodes with their children if it seems sensible.
     pub fn reduce(&mut self) -> usize {
         let mut data_count = self.data.len();
 
@@ -275,6 +300,7 @@ impl QuadNode {
         data_count
     }
 
+    /// Returns all quad-tree regions containing data.
     pub fn regions(&self) -> Vec<(u32, u32, u32, u32)> {
         let mut regions = Vec::new();
 

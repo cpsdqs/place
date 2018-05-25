@@ -6,6 +6,7 @@ use std::sync::{Weak, Mutex};
 use ws;
 use {UpdateMsg, GlobalState};
 
+/// Splits the string into parts, respecting quoted text.
 fn split_command(cmd: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut quotes = None;
@@ -24,26 +25,32 @@ fn split_command(cmd: &str) -> Vec<String> {
         } else if Some(c) == quotes && !prev_was_backslash {
             quotes = None;
             push_part(&mut parts, &mut part);
-        } else if !prev_was_backslash && (c == '\'' || c == '"') {
+        } else if !prev_was_backslash && quotes == None && (c == '\'' || c == '"') {
             push_part(&mut parts, &mut part);
             quotes = Some(c);
-        } else {
+        } else if c != '\\' || prev_was_backslash {
             part.push(c);
         }
 
-        prev_was_backslash = c == '/';
+        prev_was_backslash = c == '\\';
     }
     push_part(&mut parts, &mut part);
 
     parts
 }
 
+/// A call.
 struct CmdCall {
     command: String,
+
+    /// Parameters like `--a b`
     params: HashMap<String, String>,
+
+    /// Arguments.
     args: Vec<String>,
 }
 
+/// Parses command parts (see above).
 fn parse_parts(mut parts: Vec<String>) -> Option<CmdCall> {
     let command = match parts.get(0) {
         Some(c) => c.to_string(),
@@ -70,6 +77,7 @@ fn parse_parts(mut parts: Vec<String>) -> Option<CmdCall> {
     })
 }
 
+/// Runs a command in the given “context” (out, update_tx, global_weak).
 pub fn run_command(
     out: &ws::Sender,
     update_tx: &Sender<UpdateMsg>,
@@ -104,6 +112,7 @@ pub fn run_command(
         "broadcast" => {
             if call.args.len() < 1 {
                 send_line("broadcast <message>");
+                return;
             }
             update_tx
                 .send(UpdateMsg::Broadcast {

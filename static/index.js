@@ -118,7 +118,7 @@ let redraw = function () {
     let i = 0;
     let removeBroadcasts = [];
     for (let broadcast of broadcasts) {
-        let bdt = (now - broadcast.time) / 1000
+        let bdt = (now - broadcast.time) / 1000;
         let opacity = bdt > 10 ? 0 : bdt > 8 ? 1 - (bdt - 8) / 2 : 1;
         if (bdt > 10) removeBroadcasts.push(i);
 

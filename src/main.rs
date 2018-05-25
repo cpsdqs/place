@@ -171,8 +171,8 @@ fn update_thread(rx: mpsc::Receiver<UpdateMsg>, global_lock: Arc<Mutex<GlobalSta
             dirty = false;
         }
 
-        // wait 16ms for ~60fps
-        thread::sleep(time::Duration::new(0, 16_666_667));
+        // wait 33ms for ~30fps
+        thread::sleep(time::Duration::new(0, 33_333_333));
     }
 }
 
